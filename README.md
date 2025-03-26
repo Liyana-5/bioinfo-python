@@ -1,0 +1,2 @@
+# bioinfo-python
+Pthon scripting 

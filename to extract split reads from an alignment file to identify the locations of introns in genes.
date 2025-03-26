@@ -1,0 +1,142 @@
+#importing necessary module
+import sys 
+import re
+
+#defining a function for extracting junctions from CIGAR & appending the junctions as tuple to a list
+def extarct_junctions (cigar,start_position):
+    #define an empty list to store junctions   
+    junctions = []
+    
+    #use regex to parse through CIGAR  
+    for match in re.finditer(r'(\d+)([MNISDN])',cigar):
+        intron_position = int((match.group(1)))#number before cigar charecter
+        cigar_charecter = (match.group(2))#cigar charecters
+    
+        #check if CIGAR charecter is 'M'(matche) or 'D' (Deletion)        
+        if cigar_charecter == 'M'or cigar_charecter == 'D':
+            #update start position by adding intron position
+            start_position += intron_position
+        
+        #check if CIGAR charecter is'N'(junctions)      
+        elif cigar_charecter == 'N':
+            #define junction start and end positions            
+            junction_start=start_position
+            junction_end= start_position+intron_position
+            #append junction start and end positions to empty list           
+            junctions.append((junction_start, junction_end))
+            #update the start position for next junction          
+            start_position = junction_end
+    
+        #skip any other charecters('I' &'S') in CIGAR        
+        else:
+            pass
+
+    return (junctions)
+
+#writting out assert statements to test function
+assert extarct_junctions('100M20N',100) ==  [(200, 220)]
+assert extarct_junctions('100M20D20N',100) ==  [(220, 240)]
+assert extarct_junctions('100M20N20I20S20D',100) == [(200, 220)]
+assert extarct_junctions('100M20N30D20N',100) ==  [(200, 220),(250,270)]
+assert extarct_junctions('100M20N30D10N10D10N',100) == [(200,220),(250,260),(270,280)]
+
+#check if two inputs are passed in command line 
+if len(sys.argv) !=3:
+    sys.exit('Please give in two impot files at command line ')
+
+
+sam_file =sys.argv[1]
+
+#creating an empty dictionary to hold unique junctions and their read counts
+junctions_dict  ={}
+
+#opening sam file within try/except block
+try:
+    with open (sam_file) as alighn_file:
+        #iterating through lines in sam file
+        for lines in alighn_file:
+            lines= lines.rstrip()
+            #skipping lines if it starts with '@'
+            if lines.startswith('@'):
+                continue
+            
+            #splitting the lines and obtaining necessary columns in sam file
+            lines=lines.rstrip().split('\t')
+            Rname = lines[2]#chromosome name  
+            pos=int (lines[3])#alignment starting position
+            cigar = lines [5]#CIGAR string
+            
+            #using regex obtain reads that alighn uniquely 
+            for cols in lines:
+                match = re.search(r'NH:i:1', cols)
+                #proceed only if there is a match and 'N' (junction) in cigar
+                if match and 'N' in cigar:
+                        #assigning start position of as the alignment starting position
+                        start_position = pos
+                        #calling function extract_junctions to find junctions
+                        junctions_found = extarct_junctions(cigar, start_position)
+                        
+                        #looping through the junctions found by the function
+                        for junction in junctions_found:
+                            #if the junction is not a key in dictionary add 1 to the value
+                            if junction not in junctions_dict:
+                                junctions_dict[junction] = 1
+                            else:
+                                #if junction is a key in dictionary increase value by 1
+                                junctions_dict[junction] += 1
+    
+#print the except error           
+except FileNotFoundError:
+    sys.exit(f'The file {sam_file} cannot be found.please check and try again.\n')
+
+
+tab_file = sys.argv[2]
+
+#hardcoding the output file as the student id 
+with open ('3043418.txt','w') as out_file:
+    #writing headers in output file
+    out_file.write(f'Gene ID\tJunction start\tJunction end\tNumber of reads supporting the junction\n')
+    
+    try:
+        with open (tab_file) as file:
+            
+            #skipping the row names in file
+            next(file)
+            #obtaing the gene information from input file
+            for rows in file:
+                rows=rows.rstrip().rsplit('\t')
+                gene_ID = rows[0]
+                gene_boundary = rows[2]
+                #splitting gene_boundary at ':' to get chromosme name and gene positions 
+                chromosome,gene_positions= gene_boundary.rsplit(':')
+                #the rightmost charecter n gene_position is removed : '(+) or '(-)'
+                gene_positions=gene_positions.rstrip('(+/-)')
+                #gene start and stop postions are obtained by splitting gene position at'..' 
+                gene_start,gene_stop= gene_positions.split('..')
+                
+                #converting gene start and stop positions to intergers by removing commas
+                gene_start = int(gene_start.replace(",",""))
+                gene_stop = int(gene_stop.replace(",",""))
+            
+                #the idea for tracking using a flag is obtained from an example provided by chatgpt v5.0
+                #tracking if the junction is matched for a gene by initiating a flag to false
+                junction_matched = False
+                #iterating through keys and values in the junctions dictionary
+                for (junction_start, junction_end), read_count in junctions_dict.items():
+                    #determining wheather the junction start and end is within the gene boundary
+                    if junction_start >= gene_start and junction_end <= gene_stop:
+                        #if all junctions are found for a gene set flag to true
+                        junction_matched = True
+                        #write the gene id,junction start position , junction end position and read count into the output file seperated by tabs
+                        out_file.write(f'{gene_ID}\t{junction_start}\t{junction_end}\t{read_count}\n')
+                
+                #if there are no junctions matched for a gene
+                if not junction_matched :
+                    #write the output as gene name only
+                    out_file.write(f'{gene_ID}\t\t\t\n')
+                
+                #add new line after each genes output
+                out_file.write('\n')
+
+    except FileNotFoundError: 
+        sys.exit(f'The file {tab_file} cannot be found.please check and try again.\n')
